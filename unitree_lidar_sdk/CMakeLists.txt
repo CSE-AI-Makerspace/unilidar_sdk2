@@ -18,6 +18,11 @@ add_executable(example_lidar_udp
 )
 target_link_libraries(example_lidar_udp  libunilidar_sdk2.a )
 
+add_executable(cloud_csv_udp
+  examples/cloud_csv_udp.cpp
+)
+target_link_libraries(cloud_csv_udp  libunilidar_sdk2.a )
+
 add_executable(example_lidar_serial
     examples/example_lidar_serial.cpp
 )

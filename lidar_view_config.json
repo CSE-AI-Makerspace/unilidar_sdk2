@@ -1,0 +1,115 @@
+{
+  "active_mode": "accumulate",
+  "modes": {
+    "live": {
+      "description": "Show only the newest LiDAR point-cloud frame.",
+      "accumulate": false,
+      "max_frames": 1,
+      "max_points": 0,
+      "voxel_size": 0.0
+    },
+    "accumulate": {
+      "description": "Accumulate recent LiDAR frames into a rolling composite point cloud.",
+      "accumulate": true,
+      "max_frames": 141,
+      "max_points": 250000,
+      "voxel_size": 0.0
+    }
+  },
+  "render": {
+    "point_size": 2.5,
+    "background": [
+      0.02,
+      0.02,
+      0.025
+    ],
+    "color_scheme": "height",
+    "color_schemes": [
+      "height",
+      "distance",
+      "intensity",
+      "ring"
+    ]
+  },
+  "filters": {
+    "statistical_outlier": {
+      "enabled": false,
+      "nb_neighbors": 20,
+      "std_ratio": 2.0
+    },
+    "plane_segmentation": {
+      "enabled": true,
+      "distance_threshold": 0.03,
+      "ransac_n": 3,
+      "num_iterations": 80,
+      "remove_plane": true,
+      "min_inliers": 100
+    }
+  },
+  "custom_calibration": {
+    "enabled": true,
+    "ground_plane": [
+      0.0005582524893543552,
+      0.004603148577953604,
+      0.9999892496308785,
+      -2.5615957387927066
+    ],
+    "base_transform_matrix": [
+      [
+        0.9999998441762414,
+        -1.2848664826435453e-06,
+        -0.0005582524893543552,
+        0.0
+      ],
+      [
+        -1.2848664826435453e-06,
+        0.9999894054546371,
+        -0.004603148577953604,
+        0.0
+      ],
+      [
+        0.0005582524893543552,
+        0.004603148577953604,
+        0.9999892496308785,
+        -2.5615957387927066
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "transform_matrix": [
+      [
+        0.9999998441762414,
+        -1.2848664826435453e-06,
+        -0.0005582524893543552,
+        0.0
+      ],
+      [
+        -1.2848664826435453e-06,
+        0.9999894054546371,
+        -0.004603148577953604,
+        0.0
+      ],
+      [
+        0.0005582524893543552,
+        0.004603148577953604,
+        0.9999892496308785,
+        -2.5615957387927066
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "yaw_degrees": 0.0,
+    "ground_distance_threshold": 0.03,
+    "ground_ransac_n": 3,
+    "ground_num_iterations": 120,
+    "ground_min_inliers": 500
+  }
+}

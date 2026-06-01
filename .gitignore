@@ -1,0 +1,25 @@
+# Local agent/editor state
+.claude/
+
+# Python/runtime artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+lidar_venv/
+
+# C/C++ build outputs
+build/
+unitree_lidar_sdk/build/
+unitree_lidar_sdk/bin/
+
+# Local remote-view notes and credentials
+SPARK04_REMOTE_VIEW.md
+
+# Generated calibration/data/model artifacts
+people_fusion/calib/
+people_fusion/detector/weights/
+people_fusion/notebooks/datasets/
+
+# Logs
+*.log
