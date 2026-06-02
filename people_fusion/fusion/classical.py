@@ -2,8 +2,8 @@
 """Classical LiDAR people detection + tracking (no ML).
 
 Pipeline per frame:
-  1. RANSAC ground removal (Open3D segment_plane), accepted only if the plane normal is
-     near-vertical so we don't strip a wall.
+  1. Structural-plane cascade (remove_structure): RANSAC out the floor, then the ceiling and
+     walls (large horizontal/vertical planes), so they don't survive into clustering as junk.
   2. HDBSCAN clustering of the remaining points (handles range-varying density without a
      fixed eps, unlike plain DBSCAN).
   3. Human-size filter on each cluster (height + footprint + min points).
@@ -31,6 +31,15 @@ class DetectConfig:
     ground_ransac_n: int = 3
     ground_num_iterations: int = 120
     ground_normal_z_min: float = 0.8  # |nz| above this => treat plane as floor
+    # structural-plane removal (walls + ceiling), shared RANSAC peeler
+    remove_walls: bool = True
+    remove_ceiling: bool = True
+    plane_distance_threshold: float = 0.05
+    plane_min_points: int = 150      # only strip planes at least this big (don't eat objects)
+    plane_max_removals: int = 4      # how many structural planes to peel off per frame
+    wall_normal_z_max: float = 0.3   # |nz| below this => plane is vertical (a wall)
+    ceiling_normal_z_min: float = 0.8  # |nz| above this => horizontal plane
+    ceiling_min_height: float = 2.0  # a horizontal plane this high (m) counts as ceiling
     hdbscan_min_cluster_size: int = 25  # smallest blob HDBSCAN will call a cluster
     hdbscan_min_samples: int = 12       # how conservative the density estimate is
     min_cluster_points: int = 25
@@ -76,12 +85,76 @@ def remove_ground(points_xyz: np.ndarray, cfg: DetectConfig) -> np.ndarray:
     return points_xyz[mask]
 
 
+def _peel_planes(points_xyz: np.ndarray, cfg: DetectConfig, is_target) -> np.ndarray:
+    """Iterative RANSAC peeler shared by the plane removers.
+
+    Drops large planes for which `is_target(nz, plane_z)` is True (nz = |normal_z|, plane_z =
+    mean height). Other large planes are looked past but *kept*, and all non-planar points
+    survive -- people/objects don't form large planes. Bounded by plane_max_removals.
+    """
+    remaining = np.ascontiguousarray(points_xyz)
+    kept: list[np.ndarray] = []
+    removed = 0
+    checks = 0
+    while removed < cfg.plane_max_removals and checks < cfg.plane_max_removals + 4:
+        checks += 1
+        if len(remaining) < cfg.ground_ransac_n + 1:
+            break
+        pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(remaining))
+        plane, inliers = pcd.segment_plane(
+            distance_threshold=cfg.plane_distance_threshold,
+            ransac_n=cfg.ground_ransac_n,
+            num_iterations=cfg.ground_num_iterations,
+        )
+        inliers = np.asarray(inliers)
+        if len(inliers) < cfg.plane_min_points:
+            break  # no large planes left to peel
+        normal = np.asarray(plane[:3], dtype=np.float64)
+        normal /= np.linalg.norm(normal) or 1.0
+        nz = abs(normal[2])
+        plane_z = float(remaining[inliers, 2].mean())
+        mask = np.ones(len(remaining), dtype=bool)
+        mask[inliers] = False
+        if is_target(nz, plane_z):
+            remaining = np.ascontiguousarray(remaining[mask])  # drop it
+            removed += 1
+        else:
+            kept.append(remaining[inliers])  # keep it, but look underneath
+            remaining = np.ascontiguousarray(remaining[mask])
+    if kept:
+        remaining = np.vstack([remaining, *kept])
+    return remaining
+
+
+def remove_ceiling(points_xyz: np.ndarray, cfg: DetectConfig) -> np.ndarray:
+    """Strip large high horizontal planes (the ceiling)."""
+    return _peel_planes(
+        points_xyz, cfg,
+        lambda nz, z: nz >= cfg.ceiling_normal_z_min and z >= cfg.ceiling_min_height,
+    )
+
+
+def remove_walls(points_xyz: np.ndarray, cfg: DetectConfig) -> np.ndarray:
+    """Strip large near-vertical planes (walls)."""
+    return _peel_planes(points_xyz, cfg, lambda nz, z: nz <= cfg.wall_normal_z_max)
+
+
+def remove_structure(points_xyz: np.ndarray, cfg: DetectConfig) -> np.ndarray:
+    """Cascade the discrete removers: floor -> ceiling -> walls."""
+    pts = remove_ground(points_xyz, cfg)
+    if cfg.remove_ceiling:
+        pts = remove_ceiling(pts, cfg)
+    if cfg.remove_walls:
+        pts = remove_walls(pts, cfg)
+    return pts
+
+
 def detect_people(points: np.ndarray, cfg: DetectConfig | None = None, skip_ground: bool = False) -> list[Detection]:
     cfg = cfg or DetectConfig()
     if points is None or len(points) == 0:
         return []
     xyz = points[:, :3]
-    non_ground = xyz if skip_ground else remove_ground(xyz, cfg)
+    non_ground = xyz if skip_ground else remove_structure(xyz, cfg)
     if len(non_ground) < cfg.hdbscan_min_cluster_size:
         return []
 
@@ -115,7 +188,7 @@ def detect_clusters(points: np.ndarray, cfg: DetectConfig | None = None,
     if points is None or len(points) == 0:
         return []
     xyz = points[:, :3]
-    non_ground = xyz if skip_ground else remove_ground(xyz, cfg)
+    non_ground = xyz if skip_ground else remove_structure(xyz, cfg)
     if len(non_ground) < cfg.hdbscan_min_cluster_size:
         return []
     labels = cluster_labels(non_ground, cfg)
