@@ -4,7 +4,8 @@
 Pipeline per frame:
   1. RANSAC ground removal (Open3D segment_plane), accepted only if the plane normal is
      near-vertical so we don't strip a wall.
-  2. DBSCAN clustering of the remaining points (Open3D cluster_dbscan).
+  2. HDBSCAN clustering of the remaining points (handles range-varying density without a
+     fixed eps, unlike plain DBSCAN).
   3. Human-size filter on each cluster (height + footprint + min points).
   4. Nearest-neighbour centroid tracker assigns stable IDs across frames.
 
@@ -21,6 +22,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import open3d as o3d
+from sklearn.cluster import HDBSCAN
 
 
 @dataclass
@@ -29,12 +31,21 @@ class DetectConfig:
     ground_ransac_n: int = 3
     ground_num_iterations: int = 120
     ground_normal_z_min: float = 0.8  # |nz| above this => treat plane as floor
-    dbscan_eps: float = 0.35
-    dbscan_min_points: int = 12
+    hdbscan_min_cluster_size: int = 25  # smallest blob HDBSCAN will call a cluster
+    hdbscan_min_samples: int = 12       # how conservative the density estimate is
     min_cluster_points: int = 25
     height_min: float = 0.8
     height_max: float = 2.2
     footprint_max: float = 0.9
+
+
+def cluster_labels(non_ground: np.ndarray, cfg: DetectConfig) -> np.ndarray:
+    """HDBSCAN cluster labels for non-ground points; -1 marks noise."""
+    return HDBSCAN(
+        min_cluster_size=cfg.hdbscan_min_cluster_size,
+        min_samples=cfg.hdbscan_min_samples,
+        copy=True,  # don't mutate the caller's array; also future-proofs the sklearn default
+    ).fit_predict(non_ground)
 
 
 @dataclass
@@ -71,11 +82,10 @@ def detect_people(points: np.ndarray, cfg: DetectConfig | None = None, skip_grou
         return []
     xyz = points[:, :3]
     non_ground = xyz if skip_ground else remove_ground(xyz, cfg)
-    if len(non_ground) < cfg.dbscan_min_points:
+    if len(non_ground) < cfg.hdbscan_min_cluster_size:
         return []
 
-    pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(non_ground))
-    labels = np.asarray(pcd.cluster_dbscan(eps=cfg.dbscan_eps, min_points=cfg.dbscan_min_points))
+    labels = cluster_labels(non_ground, cfg)
 
     detections: list[Detection] = []
     for label in range(labels.max() + 1) if labels.size and labels.max() >= 0 else []:
@@ -106,10 +116,9 @@ def detect_clusters(points: np.ndarray, cfg: DetectConfig | None = None,
         return []
     xyz = points[:, :3]
     non_ground = xyz if skip_ground else remove_ground(xyz, cfg)
-    if len(non_ground) < cfg.dbscan_min_points:
+    if len(non_ground) < cfg.hdbscan_min_cluster_size:
         return []
-    pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(non_ground))
-    labels = np.asarray(pcd.cluster_dbscan(eps=cfg.dbscan_eps, min_points=cfg.dbscan_min_points))
+    labels = cluster_labels(non_ground, cfg)
 
     out: list[Detection] = []
     for label in range(labels.max() + 1) if labels.size and labels.max() >= 0 else []:
